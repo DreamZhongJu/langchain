@@ -73,6 +73,8 @@ test = [
     "blockbuster>=1.5.26,<1.6.0",
     "langchain-tests",
     "langchain-openai",
+    "langchain-community>=0.4.1",
+    "faiss-cpu>=1.13.2",
 ]
 lint = [
     "ruff>=0.15.0,<0.16.0",

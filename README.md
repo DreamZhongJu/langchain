@@ -100,6 +100,7 @@
   from langchain_openai import ChatOpenAI
 
   load_dotenv(Path(__file__).parent / ".env")
+  ```
 
 
   @tool
@@ -158,7 +159,7 @@
 
 ### TODO
 
-- [ ] **3.1** 对照 `debug=True` 的输出，在纸上画出一次完整执行的流程图：
+- [x] **3.1** 对照 `debug=True` 的输出，在纸上画出一次完整执行的流程图：
   - `HumanMessage` 进入
   - → `model` 节点（LLM）处理
   - → LLM 返回带 `tool_calls` 的 `AIMessage`
@@ -166,13 +167,13 @@
   - → `model` 节点再次处理（带上 ToolMessage）
   - → LLM 返回不带 `tool_calls` 的 `AIMessage`（结束）
 
-- [ ] **3.2** 回答以下问题（先猜，再从 debug 输出验证）：
-  - [ ] 每次调用 LLM 时，历史消息是怎么传进去的？（看 `[values]` 里 messages 列表的增长）
-  - [ ] LLM 怎么"知道"有哪些 Tool 可以用？（Tool 的 docstring 在哪里被发送给 LLM？）
-  - [ ] `ToolMessage` 的 `tool_call_id` 和上一条 `AIMessage` 的 `tool_calls[0]['id']` 有什么关系？为什么需要这个 id？
-  - [ ] 测试 3（不需要 Tool）的 debug 输出比测试 1/2 少了哪个节点？
+- [x] **3.2** 回答以下问题（先猜，再从 debug 输出验证）：
+  - [x] 每次调用 LLM 时，历史消息是怎么传进去的？（看 `[values]` 里 messages 列表的增长）
+  - [x] LLM 怎么"知道"有哪些 Tool 可以用？（Tool 的 docstring 在哪里被发送给 LLM？）
+  - [x] `ToolMessage` 的 `tool_call_id` 和上一条 `AIMessage` 的 `tool_calls[0]['id']` 有什么关系？为什么需要这个 id？
+  - [x] 测试 3（不需要 Tool）的 debug 输出比测试 1/2 少了哪个节点？
 
-- [ ] **3.3** 修改 `02_react_agent.py`，在调用后打印完整的 messages 列表：
+- [x] **3.3** 修改 `02_react_agent.py`，在调用后打印完整的 messages 列表：
 
   ```python
   for msg in result["messages"]:
@@ -273,20 +274,71 @@ agent.invoke({"messages": [...]})
 
 #### 5.2 动手实现一个最简单的 RAG（`my_learning/03_basic_rag.py`）
 
-- [ ] 选择一个本地文档（任意 .txt 文件）
-- [ ] 用 `RecursiveCharacterTextSplitter` 把文档切成 chunks
-- [ ] 用 Embedding 模型生成向量，存入 `FAISS` 或 `Chroma`
+- [x] 选择一个本地文档（QQ空间说说备份，593 条，2011–2026 年）
+- [x] 用 `RecursiveCharacterTextSplitter` 把文档切成 chunks
+- [x] 用 Embedding 模型生成向量，存入 `FAISS`（ModelScope Qwen3-Embedding-0.6B）
 - [ ] 给定问题，检索最相关 chunks，再让 LLM 生成答案
 
 #### 5.3 读 RAG 相关源码
 
-- [ ] 找到 `RecursiveCharacterTextSplitter` 的实现，理解切分规则
-- [ ] 找到 `VectorStoreRetriever.invoke` 方法，理解检索流程
-- [ ] 理解 `similarity_search` 和 `max_marginal_relevance_search`（MMR）的区别
+- [x] 找到 `RecursiveCharacterTextSplitter` 的实现，理解切分规则
+
+  **切分规则**（`libs/text-splitters/langchain_text_splitters/character.py:107`）：
+
+  两步机制——①贪心选分隔符：遍历 `separators` 列表，找第一个在文本中能匹配到的，
+  用它切一刀；切完仍然太大的片段，换下一个分隔符递归处理，最终兜底用 `""` 逐字切。
+  ②滑动窗口合并（`base.py:152` `_merge_splits`）：把小片段逐个装入窗口，超过
+  `chunk_size` 就输出；输出后从窗口头部 pop 直到长度 ≤ `chunk_overlap`，
+  剩余内容作为下一 chunk 的开头，这就是"重叠"的物理来源。
+
+- [x] 找到 `VectorStoreRetriever.invoke` 方法，理解检索流程
+
+  ```text
+  retriever.invoke(query)                    # retrievers.py:179
+    → 配置回调（LangSmith 追踪）
+    → _get_relevant_documents()              # vectorstores/base.py:1040
+        ├─ similarity       → similarity_search()
+        ├─ mmr              → max_marginal_relevance_search()
+        └─ score_threshold  → similarity_search_with_relevance_scores()
+    → 触发 on_retriever_end 回调 → 返回 list[Document]
+  ```
+
+  `vectorstore.similarity_search()` 是绕过 Retriever 层的直接调用；
+  接 `create_retrieval_chain()` 时必须用 `as_retriever()` 形式。
+
+- [x] 理解 `similarity_search` 和 `max_marginal_relevance_search`（MMR）的区别
+
+  | | similarity_search | MMR |
+  | --- | --- | --- |
+  | 选择标准 | 按余弦距离降序取前 K 个 | `λ × 相关性 − (1−λ) × 冗余惩罚` |
+  | 结果特点 | 最相关，但可能重复 | 相关且多样 |
+  | 关键参数 | `k` | `k`, `fetch_k`, `lambda_mult` |
+
+  MMR 算法（`vectorstores/utils.py:149`）：先捞 `fetch_k` 个候选，然后贪心逐个挑选，
+  每轮把"与已选文档的最大相似度"作为惩罚项；`lambda_mult=1` 退化为纯相似度排序，
+  `lambda_mult=0` 只追求多样性。
 
 #### 5.4 实验：RAG 参数对结果的影响
 
-- [ ] 调整 `chunk_size` 和 `chunk_overlap`，观察检索质量变化
+- [x] 调整 `chunk_size` 和 `chunk_overlap`，观察检索质量变化
+
+  测试数据：547 条说说，平均原始长度约 **124 字**。
+
+  | chunk_size | chunk_overlap | chunk 数 | 平均长度 |
+  | --- | --- | --- | --- |
+  | 100 | 0 | 1184 | 56 字 |
+  | 100 | 30 | 1227 | 60 字 |
+  | 300 | 50 | 632 | 109 字 |
+  | **500** | **50** | **562** | **121 字**（当前配置） |
+  | 500 | 150 | 562 | 122 字 |
+  | 1000 | 100 | 548 | 124 字 |
+
+  **结论：**
+  1. `chunk_size` 要小于原文平均长度才有实际切分效果。本数据集说说均长 124 字，`chunk_size=500` 相当于几乎不切，从 500 增大到 1000 chunk 数几乎不变（562→548）。
+  2. `chunk_overlap` 在短文本上效果有限。overlap 从 50 改到 150，chunk 数完全不变；overlap 在长文档（论文、手册）中才更有价值。
+  3. chunk 太大会导致返回重复内容。`similarity_search` 会返回同一条说说的多个相邻 chunk，可用 MMR 或缩小 `chunk_size` 缓解。
+  4. 对说说这类情感同质化强的数据，MMR 更适合——能跨年份召回多样结果，避免返回一堆同时期的雷同内容。
+
 - [ ] 调整 `k`（返回的 chunk 数量），观察 LLM 回答的变化
 
 ### 本阶段检验
@@ -299,19 +351,31 @@ agent.invoke({"messages": [...]})
 
 ### TODO
 
-- [ ] **6.1** 把 RAG 检索封装成一个 Tool（`my_learning/04_rag_agent.py`）：
+- [x] **6.1** 把 RAG 检索封装成一个 Tool（`my_learning/04_rag_agent.py`）：
 
   ```python
   @tool
   def search_my_notes(query: str) -> str:
-      """从我的学习笔记中检索相关信息。当问题涉及特定知识时使用此工具。"""
-      # 调用你在阶段五实现的检索逻辑
-      ...
+      """搜索用户的个人笔记库，包含：个人成长经历与回忆（高中、大学、暑假等各阶段）、
+      读书笔记（如《小狗钱钱》）、学习心得（英语、蓝桥杯、CET-6、口播练习等）、
+      AI 问答记录、环境搭建教程等。
+      当问题涉及用户的个人经历、学习记录或私有知识时，必须调用此工具，不得凭空回答。
+      """
+      results = vectorstore.max_marginal_relevance_search(query, k=5, fetch_k=20, lambda_mult=0.7)
+      return "\n\n---\n\n".join(
+          [f"[来源：{doc.metadata['source']}]\n{doc.page_content}" for doc in results]
+      )
   ```
 
-- [ ] **6.2** 把这个 Tool 加入 `create_agent`，Agent 自主决定什么时候检索
-- [ ] **6.3** 测试：让 Agent 回答一个只有笔记里才有答案的问题
-- [ ] **6.4** 实验：修改 Tool 的 docstring，观察对检索触发率的影响
+  **调试过程中发现的问题：**
+  - tool docstring 模糊（只写"学习笔记"）→ LLM 不确定何时调用，导致 Agent 绕过 Tool 自行回答
+  - `k=3` 不够 → 增大到 5，且改用 MMR 避免反复返回同一个文件的内容
+  - 极短文件（`环境搭建.md`，105 字）切成单个小 chunk，余弦相似度对各种查询偏高，导致检索被干扰
+  - 加 `system_prompt` 明确告知 Agent"这是你的私人笔记库，涉及个人经历必须先检索"后触发率显著提高
+
+- [x] **6.2** 把这个 Tool 加入 `create_agent`，Agent 自主决定什么时候检索
+- [x] **6.3** 测试：让 Agent 回答一个只有笔记里才有答案的问题
+- [x] **6.4** 实验：修改 Tool 的 docstring，观察对检索触发率的影响
 
 ### 本阶段检验
 
@@ -323,9 +387,9 @@ agent.invoke({"messages": [...]})
 
 ### TODO
 
-- [ ] **7.1** 实现一个真实有用的自定义 Tool（查天气、读本地文件、调用某个 API）
+- [x] **7.1** 实现一个真实有用的自定义 Tool（查天气、读本地文件、调用某个 API）
 
-- [ ] **7.2** 给 Agent 添加对话历史记忆（使用 LangGraph 的 `checkpointer`）：
+- [x] **7.2** 给 Agent 添加对话历史记忆（使用 LangGraph 的 `checkpointer`）：
 
   ```python
   from langgraph.checkpoint.memory import MemorySaver
@@ -334,11 +398,10 @@ agent.invoke({"messages": [...]})
   # 用 config={"configurable": {"thread_id": "..."}} 区分不同会话
   ```
 
-- [ ] **7.3** 用 `system_prompt` 参数给 Agent 设定角色和行为限制
+- [x] **7.3** 用 `system_prompt` 参数给 Agent 设定角色和行为限制
 
-- [ ] **7.4** 实现一个多 Agent 协作的系统（一个 Agent 负责规划，一个负责执行）
+- [x] **7.4** 实现一个多 Agent 协作的系统（一个 Agent 负责规划，一个负责执行）
 
-- [ ] **7.5** 阅读 `factory.py` 的 `create_agent` 源码，自己用 LangGraph 从零手写一个等价的 Agent
 
 ---
 
@@ -360,6 +423,25 @@ agent.invoke({"messages": [...]})
 - DeepSeek API Key 不能硬编码在代码里，改用 `.env` + `load_dotenv`
 - `langchain_v1` v1.x 的 `create_agent` 底层是 LangGraph，与网上旧版教程 API 不同
 - VS Code Pylance 报错不代表运行出错，需确认 Python 解释器指向 `.venv`
+
+### 传统 RAG 的局限性
+
+传统 RAG（向量检索 + LLM 生成）本质上是**关键词语义匹配**，存在三个固有缺陷：
+
+1. **依赖 Embedding 模型的质量**
+   检索效果的上限由向量模型决定。小模型（如 0.6B）对中文语义的对齐能力弱，
+   同样的问题用 4B 模型就能一次命中，用 0.6B 需要 Agent 反复重试。
+   向量模型无法理解问题的"意图"，只能计算字面语义的余弦距离。
+
+2. **缺乏上下文感知能力**
+   每次检索都是独立的单次查询，不感知对话历史。
+   用户问"他后来怎么了"，RAG 不知道"他"指谁，只能用这四个字去检索，必然失败。
+   需要额外的 `create_history_aware_retriever` 先让 LLM 把问题改写成独立查询，才能解决。
+
+3. **chunk 切分破坏了长程上下文**
+   文档被切成固定大小的 chunk 后，跨 chunk 的推理关系就断了。
+   比如"第一章提到的概念在第三章的应用"这类问题，单个 chunk 无法覆盖，
+   靠 `chunk_overlap` 只能缓解相邻 chunk 的断裂，跨越多 chunk 的语义无能为力。
 
 ---
 
