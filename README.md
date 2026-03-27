@@ -268,16 +268,16 @@ agent.invoke({"messages": [...]})
 
 #### 5.1 理解 RAG 的核心概念
 
-- [ ] 什么是 Embedding（向量嵌入）？为什么能用来做相似度搜索？
-- [ ] 什么是 Vector Store（向量数据库）？
-- [ ] RAG 解决了 LLM 的什么核心问题（知识截止 / 私有数据）？
+- [x] 什么是 Embedding（向量嵌入）？为什么能用来做相似度搜索？
+- [x] 什么是 Vector Store（向量数据库）？
+- [x] RAG 解决了 LLM 的什么核心问题（知识截止 / 私有数据）？
 
 #### 5.2 动手实现一个最简单的 RAG（`my_learning/03_basic_rag.py`）
 
 - [x] 选择一个本地文档（QQ空间说说备份，593 条，2011–2026 年）
 - [x] 用 `RecursiveCharacterTextSplitter` 把文档切成 chunks
 - [x] 用 Embedding 模型生成向量，存入 `FAISS`（ModelScope Qwen3-Embedding-0.6B）
-- [ ] 给定问题，检索最相关 chunks，再让 LLM 生成答案
+- [x] 给定问题，检索最相关 chunks，再让 LLM 生成答案
 
 #### 5.3 读 RAG 相关源码
 
@@ -402,6 +402,75 @@ agent.invoke({"messages": [...]})
 
 - [x] **7.4** 实现一个多 Agent 协作的系统（一个 Agent 负责规划，一个负责执行）
 
+- [x] **7.5** 阅读 `factory.py` 的 `create_agent` 源码，自己用 LangGraph 从零手写一个等价的 Agent
+
+---
+
+## 阶段八：源码改造实验
+
+> 真正读懂源码的标志：能改动它，并预测改动的效果。
+
+### TODO
+
+- [ ] **8.1** 写一份"LangChain v1 Agent 执行流程源码解析"文档
+  - 从 `create_agent` 到 `model_node`、`tools_node`、条件边判断的完整路径
+  - 画出 LangGraph 状态流转图，解释每一步的设计意图
+  - 这是面试时展示"源码级理解"的核心素材
+
+- [ ] **8.2** 做一个源码小改动并验证
+  - 修改 `_make_model_to_tools_edge` 的退出逻辑（[factory.py:1684](libs/langchain_v1/langchain/agents/factory.py#L1684)），让 Agent 连续调用工具超过 N 次后强制停止
+  - 重新编译运行测试，验证效果
+  - 目标：证明自己不只是"读懂了"，而是"能改动它"
+
+---
+
+## 阶段九：RAG 系统打磨
+
+> 从"能跑"到"能用"。
+
+### TODO
+
+- [ ] **9.1** 增强 `search_my_notes` Tool 的鲁棒性
+  - 用 `similarity_search_with_score` 获取相关性分数
+  - 当最高分低于阈值时，返回"笔记中没有相关信息"，而不是低质量的检索结果
+  - 处理检索结果为空的边界情况
+
+- [ ] **9.2** 接入 `create_history_aware_retriever`
+  - 解决传统 RAG 不感知对话历史的问题
+  - 测试场景："我去年暑假做了什么？" → "那后来呢？" 验证 Agent 能否正确理解"那"指代的是暑假经历
+
+- [ ] **9.3** 测试并优化多轮对话场景
+  - 当前问题：第二轮会把全部历史 token 重新发送，成本高
+  - 探索：planner 如何判断"这一轮能直接用上一轮的检索结果回答"
+
+---
+
+## 阶段十：完整项目与技术输出
+
+> 把学习笔记变成作品集，把研究变成影响力。
+
+### TODO
+
+#### 10.1 个人知识库 Agent（核心项目）
+
+- [ ] 结合 KG-RAG 方向，设计"向量检索 + 知识图谱"双轨检索架构
+  - 向量检索（FAISS）：回答"我高中做了什么"这类语义问题
+  - 知识图谱（Neo4j）：回答"我哪一年拿了蓝桥杯国奖"这类精确关系查询
+  - Agent 自主决定调哪个 Tool
+- [ ] 技术栈：LangChain v1 + Neo4j + FAISS + LangGraph + Streamlit（界面）
+- [ ] 产出指标：检索准确率、Agent 任务完成率
+
+#### 10.2 开源与公开
+
+- [ ] 创建 GitHub 仓库，整理现有代码和学习笔记，写清晰的 README（含架构图）
+- [ ] 写技术文章：《LangChain v1 Agent 源码深度解析》，发布到掘金 / 知乎
+- [ ] 写技术文章：《手把手教你构建一个能聊天的个人知识库 Agent》
+- [ ] 尝试向 LangChain 提交一个 PR（改进文档或修复小 bug）
+
+#### 10.3 面试素材准备
+
+- [ ] 整理"复杂项目"的面试表述：需求 → 难点 → 解决方案 → 效果
+- [ ] 准备 LangGraph 状态流转图，能在面试中白板讲清楚调用链
 
 ---
 
